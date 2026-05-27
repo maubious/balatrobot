@@ -6,6 +6,7 @@ import pytest
 
 from balatrobot.config import Config
 from balatrobot.platforms import VALID_PLATFORMS, get_launcher
+from balatrobot.platforms.linux import LinuxLauncher
 from balatrobot.platforms.macos import MacOSLauncher
 from balatrobot.platforms.native import NativeLauncher
 from balatrobot.platforms.windows import WindowsLauncher
@@ -38,10 +39,10 @@ class TestGetLauncher:
         launcher = get_launcher("windows")
         assert isinstance(launcher, WindowsLauncher)
 
-    def test_linux_not_implemented(self):
-        """'linux' raises NotImplementedError."""
-        with pytest.raises(NotImplementedError):
-            get_launcher("linux")
+    def test_linux_returns_linux_launcher(self):
+        """'linux' returns LinuxLauncher."""
+        launcher = get_launcher("linux")
+        assert isinstance(launcher, LinuxLauncher)
 
     def test_valid_platforms_constant(self):
         """VALID_PLATFORMS contains expected values."""
@@ -95,6 +96,109 @@ class TestMacOSLauncher:
         cmd = launcher.build_cmd(config)
 
         assert cmd == ["/path/to/love"]
+
+
+@pytest.mark.skipif(not IS_LINUX, reason="Linux only")
+class TestLinuxLauncher:
+    """Tests for Linux launcher (Linux only)."""
+
+    def test_validate_paths_missing_steam_root(self, tmp_path, monkeypatch):
+        """Raises RuntimeError when Steam root not found."""
+        launcher = LinuxLauncher()
+        config = Config()
+        # Point HOME to tmp_path so Steam detection fails
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("DISPLAY", ":0")
+        with pytest.raises(RuntimeError, match="Steam installation not found"):
+            launcher.validate_paths(config)
+
+    def test_validate_paths_missing_display(self, tmp_path, monkeypatch):
+        """Raises RuntimeError when no display server is available."""
+        monkeypatch.delenv("DISPLAY", raising=False)
+        monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+        launcher = LinuxLauncher()
+        config = Config()
+        with pytest.raises(RuntimeError, match="No display server found"):
+            launcher.validate_paths(config)
+
+    def test_validate_paths_auto_detects_balatro(self, tmp_path, monkeypatch):
+        """Auto-detects Balatro game dir under Steam root."""
+        # Create fake Steam root with Balatro
+        steam_root = tmp_path / ".local/share/Steam"
+        balatro = steam_root / "steamapps/common/Balatro"
+        balatro.mkdir(parents=True)
+        (balatro / "Balatro.exe").touch()
+        # Create fake proton
+        proton_dir = steam_root / "steamapps/common/Proton - Experimental"
+        proton_dir.mkdir(parents=True)
+        (proton_dir / "proton").touch()
+        # Create fake version.dll
+        (balatro / "version.dll").touch()
+        # Create fake compat data
+        compat = steam_root / "steamapps/compatdata/2379780"
+        compat.mkdir(parents=True)
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("DISPLAY", ":0")
+        launcher = LinuxLauncher()
+        config = Config()
+        launcher.validate_paths(config)
+
+        assert config.balatro_path is not None
+        assert "Balatro" in config.balatro_path
+
+    def test_validate_paths_missing_balatro_exe(self, tmp_path, monkeypatch):
+        """Raises RuntimeError when Balatro.exe is missing."""
+        steam_root = tmp_path / ".local/share/Steam"
+        balatro = steam_root / "steamapps/common/Balatro"
+        balatro.mkdir(parents=True)
+        # No Balatro.exe
+        proton_dir = steam_root / "steamapps/common/Proton - Experimental"
+        proton_dir.mkdir(parents=True)
+        (proton_dir / "proton").touch()
+        (balatro / "version.dll").touch()
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("DISPLAY", ":0")
+        launcher = LinuxLauncher()
+        config = Config()
+        with pytest.raises(RuntimeError, match="Balatro game directory not found"):
+            launcher.validate_paths(config)
+
+    def test_build_env_includes_winedlloverrides(self):
+        """build_env includes WINEDLLOVERRIDES."""
+        launcher = LinuxLauncher()
+        config = Config()
+        env = launcher.build_env(config)
+        assert env["WINEDLLOVERRIDES"] == "version=n,b"
+
+    def test_build_env_includes_steam_compat_vars(self, tmp_path, monkeypatch):
+        """build_env includes STEAM_COMPAT_* vars when Steam root detected."""
+        steam_root = tmp_path / ".local/share/Steam"
+        compat = steam_root / "steamapps/compatdata/2379780"
+        compat.mkdir(parents=True)
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("DISPLAY", ":0")
+
+        launcher = LinuxLauncher()
+        config = Config()
+        env = launcher.build_env(config)
+
+        assert "STEAM_COMPAT_CLIENT_INSTALL_PATH" in env
+        assert "Steam" in env["STEAM_COMPAT_CLIENT_INSTALL_PATH"]
+        assert "STEAM_COMPAT_DATA_PATH" in env
+        assert "compatdata/2379780" in env["STEAM_COMPAT_DATA_PATH"]
+
+    def test_build_cmd(self):
+        """build_cmd returns proton run with Balatro.exe."""
+        launcher = LinuxLauncher()
+        config = Config(
+            love_path="/path/to/proton",
+            balatro_path="/path/to/Balatro",
+        )
+        cmd = launcher.build_cmd(config)
+        assert cmd == ["/path/to/proton", "run", "/path/to/Balatro/Balatro.exe"]
 
 
 @pytest.mark.skipif(not IS_LINUX, reason="Linux only")
