@@ -495,6 +495,7 @@ class TestHTTPServerSequentialRequests:
         )
         assert response4.status_code == 200
 
+
 class TestHTTPServerConcurrency:
     """Tests for concurrent request handling."""
 
@@ -506,7 +507,9 @@ class TestHTTPServerConcurrency:
         results: dict[str, bytes] = {}
 
         def raw_post(method: str, rid: int, key: str) -> None:
-            body = json.dumps({"jsonrpc": "2.0", "method": method, "params": {}, "id": rid})
+            body = json.dumps(
+                {"jsonrpc": "2.0", "method": method, "params": {}, "id": rid}
+            )
             req = (
                 f"POST / HTTP/1.1\r\nHost: {instance.host}:{instance.port}\r\n"
                 f"Content-Type: application/json\r\nContent-Length: {len(body)}\r\n\r\n{body}"
@@ -542,5 +545,7 @@ class TestHTTPServerConcurrency:
             assert raw.startswith(b"HTTP/"), f"{key}: got {raw!r}"
 
         # Server must still be alive
-        resp = client.post("/", json={"jsonrpc": "2.0", "method": "health", "params": {}, "id": 3})
+        resp = client.post(
+            "/", json={"jsonrpc": "2.0", "method": "health", "params": {}, "id": 3}
+        )
         assert resp.json()["result"]["status"] == "ok"
