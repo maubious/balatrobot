@@ -27,16 +27,17 @@ return {
     sendDebugMessage("Init cash_out()", "BB.ENDPOINTS")
     G.FUNCS.cash_out({ config = {} })
 
-    local num_items = function(area)
+    local area_ready = function(area)
       local count = 0
       if area and area.cards then
         for _, v in ipairs(area.cards) do
-          if v.children.buy_button and v.children.buy_button.definition then
-            count = count + 1
+          if v.temp_edition or not v.children.buy_button or not v.children.buy_button.definition then
+            return false, count
           end
+          count = count + 1
         end
       end
-      return count
+      return true, count
     end
 
     -- Wait for SHOP state after state transition completes
@@ -46,7 +47,21 @@ return {
       func = function()
         local done = false
         if G.STATE == G.STATES.SHOP and G.STATE_COMPLETE then
-          done = num_items(G.shop_booster) > 0 or num_items(G.shop_jokers) > 0 or num_items(G.shop_vouchers) > 0
+          local boosters_ready, boosters = area_ready(G.shop_booster)
+          local cards_ready, cards = area_ready(G.shop_jokers)
+          local vouchers_ready, vouchers = area_ready(G.shop_vouchers)
+          local tags_ready = true
+          for _, tag in ipairs(G.GAME.tags or {}) do
+            if tag.config and tag.config.type == "store_joker_modify" then
+              tags_ready = false
+              break
+            end
+          end
+          done = boosters_ready
+            and cards_ready
+            and vouchers_ready
+            and tags_ready
+            and boosters + cards + vouchers > 0
           if done then
             sendDebugMessage("Return cash_out() - reached SHOP state", "BB.ENDPOINTS")
             send_response(BB_GAMESTATE.get_gamestate())
