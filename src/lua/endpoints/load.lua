@@ -69,7 +69,18 @@ return {
       return
     end
 
-    -- Load using game's built-in functions
+    -- A checkpoint restore replaces the branch completely. The normal queue
+    -- clear preserves no_delete events for UI transitions, but those events
+    -- belong to the discarded branch and may mutate the restored run later.
+    if G.E_MANAGER and G.E_MANAGER.queues then
+      for _, queue in pairs(G.E_MANAGER.queues) do
+        for index = #queue, 1, -1 do
+          table.remove(queue, index)
+        end
+      end
+    end
+
+    -- Load using the game's built-in functions.
     G:delete_run()
     G.SAVED_GAME = get_compressed(temp_filename) ---@diagnostic disable-line: undefined-global
 
@@ -83,6 +94,50 @@ return {
     end
 
     G.SAVED_GAME = STR_UNPACK(G.SAVED_GAME)
+
+    -- Game:start_run normalizes zero-valued pseudorandom entries and Card
+    -- reconstruction may touch additional streams. That is appropriate for a
+    -- normal continue, but validation checkpoints must restore the hidden RNG
+    -- state exactly so a loaded branch matches uninterrupted gameplay.
+    local saved_pseudorandom = G.SAVED_GAME
+      and G.SAVED_GAME.GAME
+      and G.SAVED_GAME.GAME.pseudorandom
+      and copy_table(G.SAVED_GAME.GAME.pseudorandom)
+
+    -- Match Game:start_run's save-load normalization. Zero is a serialized
+    -- sentinel, not a usable stream value (and is truthy in Lua), so restoring
+    -- it verbatim would make the next pseudoseed advance from zero rather than
+    -- from pseudohash(key .. seed).
+    if saved_pseudorandom then
+      for key, value in pairs(saved_pseudorandom) do
+        if value == 0 then
+          saved_pseudorandom[key] = pseudohash(key .. saved_pseudorandom.seed)
+        end
+      end
+      saved_pseudorandom.hashed_seed = pseudohash(saved_pseudorandom.seed)
+    end
+
+    -- STR_PACK serializes hash keys in pairs() order. Recreating GAME.hands
+    -- from that text can therefore change the table's iteration order, while
+    -- source effects such as To Do List intentionally build their candidate
+    -- list with pairs(G.GAME.hands). Keep the source-created outer table (and
+    -- its uninterrupted-run order), but copy every saved hand value into it.
+    if G.SAVED_GAME.GAME and G.SAVED_GAME.GAME.hands then
+      local saved_hands = G.SAVED_GAME.GAME.hands
+      local source_hands = G:init_game_object().hands
+      for hand_key, saved_hand in pairs(saved_hands) do
+        if source_hands[hand_key] then
+          for field, value in pairs(saved_hand) do
+            source_hands[hand_key][field] = value
+          end
+        else
+          source_hands[hand_key] = saved_hand
+        end
+      end
+      G.SAVED_GAME.GAME.hands = source_hands
+    end
+
+    BB_PENDING_PSEUDORANDOM_RESTORE = nil
 
     -- Temporarily suppress "Card area not instantiated" warnings during load
     -- These are expected when loading a save from shop state (shop CardAreas
@@ -153,6 +208,13 @@ return {
         end
 
         if done then
+          -- start_run schedules part of card/shop reconstruction on the event
+          -- manager. Restoring immediately after start_run is therefore too
+          -- early: those deferred Card:set_ability calls can advance hidden
+          -- streams (notably `to_do`) before the loaded state settles. Apply
+          -- the saved table at the same boundary exposed to API callers.
+          BB_PENDING_PSEUDORANDOM_RESTORE = saved_pseudorandom
+          saved_pseudorandom = nil
           sendDebugMessage("Return load() - loaded from " .. path, "BB.ENDPOINTS")
           send_response({
             success = true,

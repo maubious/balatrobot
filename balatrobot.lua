@@ -4,6 +4,9 @@ assert(SMODS.load_file("src/lua/settings.lua"))() -- define BB_SETTINGS
 -- Configure Balatro with appropriate settings from environment variables
 BB_SETTINGS.setup()
 
+-- Keep differential validation stable across the active mod stack.
+BB_SOURCE_COMPAT = assert(SMODS.load_file("src/lua/utils/source_compat.lua"))()
+
 -- Endpoints for the BalatroBot API
 BB_ENDPOINTS = {
   -- Health endpoint
@@ -13,6 +16,8 @@ BB_ENDPOINTS = {
   -- Save/load endpoints
   "src/lua/endpoints/save.lua",
   "src/lua/endpoints/load.lua",
+  -- Manual UI action recording
+  "src/lua/endpoints/record.lua",
   -- Screenshot endpoint
   "src/lua/endpoints/screenshot.lua",
   -- Game control endpoints
@@ -24,6 +29,7 @@ BB_ENDPOINTS = {
   -- Blind selection endpoints
   "src/lua/endpoints/skip.lua",
   "src/lua/endpoints/select.lua",
+  "src/lua/endpoints/reroll_boss.lua",
   -- Play/discard endpoints
   "src/lua/endpoints/play.lua",
   "src/lua/endpoints/discard.lua",
@@ -55,6 +61,7 @@ assert(SMODS.load_file("src/lua/core/dispatcher.lua"))() -- define BB_DISPATCHER
 
 -- Load gamestate and errors utilities
 BB_GAMESTATE = assert(SMODS.load_file("src/lua/utils/gamestate.lua"))()
+BB_RECORDER = assert(SMODS.load_file("src/lua/utils/recorder.lua"))()
 assert(SMODS.load_file("src/lua/utils/errors.lua"))()
 
 -- Initialize Server

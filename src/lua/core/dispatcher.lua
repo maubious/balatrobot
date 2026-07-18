@@ -137,6 +137,16 @@ function BB_DISPATCHER.dispatch(request)
     BB_RENDER = true
   end
 
+  -- Loading a run schedules reconstruction work beyond the point at which the
+  -- load endpoint can reliably declare the UI ready. Some Card constructors
+  -- consume gameplay RNG streams. Restore the checkpoint's hidden RNG state
+  -- at the next API boundary, after that deferred work and immediately before
+  -- the caller observes or mutates the loaded run.
+  if BB_PENDING_PSEUDORANDOM_RESTORE and G and G.GAME then
+    G.GAME.pseudorandom = BB_PENDING_PSEUDORANDOM_RESTORE
+    BB_PENDING_PSEUDORANDOM_RESTORE = nil
+  end
+
   -- TIER 1: Protocol Validation (jsonrpc version checked in server.receive())
   if not request.method or type(request.method) ~= "string" then
     BB_DISPATCHER.send_error("Request missing 'method' field", BB_ERROR_NAMES.BAD_REQUEST)

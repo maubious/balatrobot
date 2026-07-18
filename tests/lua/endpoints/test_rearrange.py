@@ -30,6 +30,15 @@ class TestRearrangeHandInSelectingHandState:
         ids = [card["id"] for card in after["hand"]["cards"]]
         assert ids == [prev_ids[i] for i in permutation]
 
+    @pytest.mark.parametrize("mode", ("rank", "suit"))
+    def test_sort_hand_with_source_callback(self, client: httpx.Client, mode: str) -> None:
+        """Rank/suit sorting invokes the same callback as the live UI buttons."""
+        before = load_fixture(client, "rearrange", "state-SELECTING_HAND--hand.count-8")
+        prev_ids = {card["id"] for card in before["hand"]["cards"]}
+        after = assert_gamestate_response(api(client, "rearrange", {"sort": mode}))
+        assert after["state"] == "SELECTING_HAND"
+        assert {card["id"] for card in after["hand"]["cards"]} == prev_ids
+
 
 class TestRearrangeInShopState:
     """Test rearranging cards in SHOP state."""

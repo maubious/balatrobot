@@ -28,6 +28,8 @@ return {
     sendDebugMessage("Return health()", "BB.ENDPOINTS")
     send_response({
       status = "ok",
+      source_compat = BB_SOURCE_COMPAT and BB_SOURCE_COMPAT.version or 0,
+      checkpoint_precision = 17,
     })
   end,
 }

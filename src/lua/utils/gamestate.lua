@@ -443,6 +443,9 @@ local function extract_round_info()
 
   local round = {}
 
+  -- Persistent run counter; the current-round counter resets for every blind.
+  round.run_hands_played = G.GAME.hands_played or 0
+
   if G.GAME.current_round.hands_left then
     round.hands_left = G.GAME.current_round.hands_left
   end
@@ -532,7 +535,7 @@ local function get_tag_info(tag_key)
   local tag_data = G.P_TAGS[tag_key]
   result.name = tag_data.name or ""
 
-  -- Build loc_vars based on tag name (same logic as Tag:get_uibox_table in tag.lua:545-561)
+  -- Build localization variables based on tag name.
   local loc_vars = {}
   local name = tag_data.name
   if name == "Investment Tag" then

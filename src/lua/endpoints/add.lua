@@ -6,6 +6,8 @@
 
 ---@class Request.Endpoint.Add.Params
 ---@field key Card.Key The card key to add (j_* for jokers, c_* for consumables, v_* for vouchers, SUIT_RANK for playing cards)
+---@field area string? Validation injection destination ("packs" for a shop booster, "pack" for an open-pack card)
+---@field replace integer? 0-based slot to replace when area is "pack"
 ---@field seal Card.Modifier.Seal? The card seal to apply (only for playing cards)
 ---@field edition Card.Modifier.Edition? The card edition to apply (jokers, playing cards and NEGATIVE consumables)
 ---@field enhancement Card.Modifier.Enhancement? The card enhancement to apply (playing cards)
@@ -112,6 +114,30 @@ local function parse_playing_card_key(key)
   return rank, suit
 end
 
+---Replace a fixture card's center without leaving the removed center marked
+---present in G.GAME.used_jokers. Card:remove performs this cleanup in normal
+---gameplay, but validation replacement deliberately keeps the Card object.
+---@param card Card
+---@param key string
+local function replace_card_center(card, key)
+  local old_center = card.config and card.config.center
+  local old_key = card.config and card.config.center_key
+  if not old_key and old_center then
+    for candidate_key, candidate in pairs(G.P_CENTERS) do
+      if candidate == old_center then
+        old_key = candidate_key
+        break
+      end
+    end
+  end
+  card:set_ability(G.P_CENTERS[key])
+  if old_key and old_key ~= key and old_center and old_center.name then
+    if not next(find_joker(old_center.name, true)) then
+      G.GAME.used_jokers[old_key] = nil
+    end
+  end
+end
+
 -- ==========================================================================
 -- Add Endpoint
 -- ==========================================================================
@@ -128,6 +154,16 @@ return {
       type = "string",
       required = true,
       description = "Card key (j_* for jokers, c_* for consumables, v_* for vouchers, SUIT_RANK for playing cards like H_A)",
+    },
+    area = {
+      type = "string",
+      required = false,
+      description = "Validation injection destination: 'packs' replaces a shop booster; 'pack' replaces an open-pack card",
+    },
+    replace = {
+      type = "integer",
+      required = false,
+      description = "0-based pack slot to replace (required when area is 'pack')",
     },
     seal = {
       type = "string",
@@ -161,7 +197,12 @@ return {
     },
   },
 
-  requires_state = { G.STATES.SELECTING_HAND, G.STATES.SHOP, G.STATES.ROUND_EVAL },
+  requires_state = {
+    G.STATES.SELECTING_HAND,
+    G.STATES.SHOP,
+    G.STATES.ROUND_EVAL,
+    G.STATES.SMODS_BOOSTER_OPENED,
+  },
 
   ---@param args Request.Endpoint.Add.Params
   ---@param send_response fun(response: Response.Endpoint)
@@ -174,6 +215,156 @@ return {
     if not card_type then
       send_response({
         message = "Invalid card key format. Expected: joker (j_*), consumable (c_*), voucher (v_*), or playing card (SUIT_RANK)",
+        name = BB_ERROR_NAMES.BAD_REQUEST,
+      })
+      return
+    end
+
+    -- Validation-only pack injection. Mutating the existing Card keeps its
+    -- stable identity, visual position, pack size, and remaining choice count.
+    -- It also avoids consuming gameplay RNG merely to arrange a test fixture.
+    if args.area ~= nil then
+      if args.area == "packs" then
+        if G.STATE ~= G.STATES.SHOP then
+          send_response({
+            message = "Shop boosters can only be replaced in the shop",
+            name = BB_ERROR_NAMES.INVALID_STATE,
+          })
+          return
+        end
+        if card_type ~= "pack" or not G.P_CENTERS[args.key] then
+          send_response({
+            message = "Booster key not found: " .. args.key,
+            name = BB_ERROR_NAMES.BAD_REQUEST,
+          })
+          return
+        end
+        if type(args.replace) ~= "number"
+          or args.replace ~= math.floor(args.replace)
+          or args.replace < 0
+        then
+          send_response({
+            message = "Shop booster replacement requires a non-negative integer 'replace' index",
+            name = BB_ERROR_NAMES.BAD_REQUEST,
+          })
+          return
+        end
+        local card = G.shop_booster
+          and G.shop_booster.cards
+          and G.shop_booster.cards[args.replace + 1]
+        if not card then
+          local count = G.shop_booster and G.shop_booster.cards and #G.shop_booster.cards or 0
+          send_response({
+            message = string.format(
+              "Shop booster index out of range. Index: %d, Available boosters: %d",
+              args.replace,
+              count
+            ),
+            name = BB_ERROR_NAMES.BAD_REQUEST,
+          })
+          return
+        end
+        replace_card_center(card, args.key)
+        card:set_cost()
+        -- Card:set_ability rebuilds children, including removing the shop UI.
+        -- Recreate the buy button so the normal purchase path remains
+        -- usable after validation replacement.
+        create_shop_card_ui(card, "Booster", G.shop_booster)
+        G.shop_booster:align_cards()
+        G.E_MANAGER:add_event(Event({
+          trigger = "condition",
+          blocking = false,
+          func = function()
+            local ready = card.children
+              and card.children.buy_button
+              and G.STATE == G.STATES.SHOP
+              and G.STATE_COMPLETE
+              and not G.CONTROLLER.locked
+            if ready then
+              send_response(BB_GAMESTATE.get_gamestate())
+              return true
+            end
+            return false
+          end,
+        }))
+        return
+      end
+      if args.area ~= "pack" then
+        send_response({
+          message = "Invalid add area. Expected: packs or pack",
+          name = BB_ERROR_NAMES.BAD_REQUEST,
+        })
+        return
+      end
+      if G.STATE ~= G.STATES.SMODS_BOOSTER_OPENED then
+        send_response({
+          message = "Pack cards can only be replaced while a booster is open",
+          name = BB_ERROR_NAMES.INVALID_STATE,
+        })
+        return
+      end
+      if card_type ~= "consumable" then
+        send_response({
+          message = "Only consumables can be injected into an open pack",
+          name = BB_ERROR_NAMES.BAD_REQUEST,
+        })
+        return
+      end
+      if type(args.replace) ~= "number"
+        or args.replace ~= math.floor(args.replace)
+        or args.replace < 0
+      then
+        send_response({
+          message = "Pack replacement requires a non-negative integer 'replace' index",
+          name = BB_ERROR_NAMES.BAD_REQUEST,
+        })
+        return
+      end
+      if not G.pack_cards or G.pack_cards.REMOVED or not G.pack_cards.cards then
+        send_response({
+          message = "No pack is currently open",
+          name = BB_ERROR_NAMES.INVALID_STATE,
+        })
+        return
+      end
+      local card = G.pack_cards.cards[args.replace + 1]
+      if not card then
+        send_response({
+          message = string.format(
+            "Pack card index out of range. Index: %d, Available cards: %d",
+            args.replace,
+            #G.pack_cards.cards
+          ),
+          name = BB_ERROR_NAMES.BAD_REQUEST,
+        })
+        return
+      end
+      local center = G.P_CENTERS[args.key]
+      if not center or not center.consumeable then
+        send_response({
+          message = "Consumable key not found: " .. args.key,
+          name = BB_ERROR_NAMES.BAD_REQUEST,
+        })
+        return
+      end
+      if args.seal or args.edition or args.enhancement or args.eternal or args.perishable or args.rental then
+        send_response({
+          message = "Pack replacement does not accept card modifiers",
+          name = BB_ERROR_NAMES.BAD_REQUEST,
+        })
+        return
+      end
+
+      replace_card_center(card, args.key)
+      card:set_cost()
+      G.pack_cards:align_cards()
+      send_response(BB_GAMESTATE.get_gamestate())
+      return
+    end
+
+    if G.STATE == G.STATES.SMODS_BOOSTER_OPENED then
+      send_response({
+        message = "Use area='pack' and replace=<index> to add during an open booster",
         name = BB_ERROR_NAMES.BAD_REQUEST,
       })
       return
@@ -359,6 +550,11 @@ return {
       -- Parse the playing card key
       local rank, suit = parse_playing_card_key(args.key)
       params = {
+        -- An exact playing-card injection must be Base unless the caller
+        -- explicitly supplies an enhancement. Without this, SMODS.create_card
+        -- performs its normal Standard-card poll and may randomly create an
+        -- Enhanced card for edition-only and seal-only requests.
+        set = "Base",
         rank = rank,
         suit = suit,
         skip_materialize = true,

@@ -40,6 +40,7 @@
 ---@field example table<integer, table> Example cards showing what makes this hand (array of [card_key, is_scored])
 
 ---@class Round
+---@field run_hands_played integer Number of hands played in the run
 ---@field hands_left integer? Number of hands remaining in this round
 ---@field hands_played integer? Number of hands played in this round
 ---@field discards_left integer? Number of discards remaining in this round
@@ -142,7 +143,7 @@
 
 ---@alias Request.Endpoint.Method
 ---| "add" | "buy" | "cash_out" | "discard" | "gamestate" | "health" | "load"
----| "menu" | "next_round" | "play" | "rearrange" | "reroll" | "save"
+---| "menu" | "next_round" | "play" | "rearrange" | "record" | "reroll" | "reroll_boss" | "save"
 ---| "screenshot" | "select" | "sell" | "set" | "skip" | "start" | "use"
 
 ---@alias Request.Endpoint.Test.Method
@@ -161,7 +162,9 @@
 ---| Request.Endpoint.Pack.Params
 ---| Request.Endpoint.Play.Params
 ---| Request.Endpoint.Rearrange.Params
+---| Request.Endpoint.Record.Params
 ---| Request.Endpoint.Reroll.Params
+---| Request.Endpoint.RerollBoss.Params
 ---| Request.Endpoint.Save.Params
 ---| Request.Endpoint.Screenshot.Params
 ---| Request.Endpoint.Select.Params

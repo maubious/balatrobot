@@ -46,11 +46,27 @@ return {
     G.FUNCS.select_blind(select_button)
 
     -- Wait for completion: transition to SELECTING_HAND with facing_blind flag set
+    local settle_started = nil
     G.E_MANAGER:add_event(Event({
       trigger = "condition",
       blocking = false,
+      blockable = false,
       func = function()
-        local done = G.STATE == G.STATES.SELECTING_HAND and G.hand ~= nil
+        local ready = (
+          G.STATE == G.STATES.SELECTING_HAND
+          and G.STATE_COMPLETE
+          and G.hand ~= nil
+        )
+        if not ready then
+          settle_started = nil
+        elseif not settle_started then
+          -- first_hand_drawn queues effects such as Certificate's sealed
+          -- playing card after the initial hand reaches SELECTING_HAND.
+          settle_started = G.TIMERS.TOTAL
+        end
+        local done = ready
+          and settle_started ~= nil
+          and G.TIMERS.TOTAL - settle_started >= 0.25
         if done then
           sendDebugMessage("Return select()", "BB.ENDPOINTS")
           local state_data = BB_GAMESTATE.get_gamestate()

@@ -36,6 +36,7 @@ return {
   ---@param send_response fun(response: Response.Endpoint)
   execute = function(args, send_response)
     sendDebugMessage("Init play()", "BB.ENDPOINTS")
+    if BB_SOURCE_COMPAT then BB_SOURCE_COMPAT.ensure() end
     if #args.cards == 0 then
       send_response({
         message = "Must provide at least one card to play",
@@ -136,7 +137,11 @@ return {
           -- Wait for cash_out_button to ensure the last scoring row (bottom) has been processed
           local has_cash_out_button = false
           for _, b in ipairs(G.I.UIBOX) do
-            if b:get_UIE_by_ID("cash_out_button") then
+            -- Old cash-out UIBoxes can briefly survive into the next round.
+            -- Only this round's evaluation proves the bottom row has set
+            -- current_round.dollars.
+            if b.config and b.config.major == G.round_eval
+              and b:get_UIE_by_ID("cash_out_button") then
               has_cash_out_button = true
               break
             end

@@ -244,6 +244,9 @@ return {
             and G.pack_cards.cards[1]
             and G.STATE_COMPLETE
             and G.STATE == G.STATES.SMODS_BOOSTER_OPENED
+            and not G.CONTROLLER.locked
+            and not G.CONTROLLER.locks.use
+            and not (G.GAME.STOP_USE and G.GAME.STOP_USE > 0)
           )
           if money_deducted and pack_ready then
             -- Check if this pack type needs hand (Arcana/Spectral packs)

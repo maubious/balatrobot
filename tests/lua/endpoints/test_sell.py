@@ -139,6 +139,19 @@ class TestSellEndpoint:
         assert after["consumables"]["count"] == 0
         assert before["money"] < after["money"]
 
+    def test_sell_consumable_in_pack_overlay(self, client: httpx.Client) -> None:
+        """Selling remains legal while a booster overlay is open."""
+        load_fixture(client, "sell", "state-SHOP--packs.count-0")
+        api(client, "add", {"key": "c_fool"})
+        api(client, "add", {"key": "p_arcana_normal_1"})
+        before = assert_gamestate_response(api(client, "buy", {"pack": 0}))
+        assert before["state"] == "SMODS_BOOSTER_OPENED"
+        assert before["consumables"]["count"] == 1
+        after = assert_gamestate_response(api(client, "sell", {"consumable": 0}))
+        assert after["state"] == "SMODS_BOOSTER_OPENED"
+        assert after["consumables"]["count"] == 0
+        assert before["money"] < after["money"]
+
 
 class TestSellEndpointValidation:
     """Test sell endpoint parameter validation."""

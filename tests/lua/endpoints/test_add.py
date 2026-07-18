@@ -70,6 +70,26 @@ class TestAddEndpoint:
         assert after["consumables"]["count"] == 1
         assert after["consumables"]["cards"][0]["key"] == "c_familiar"
 
+    def test_replace_open_pack_card_with_spectral(self, client: httpx.Client) -> None:
+        """Validation setup can force a Spectral without changing pack shape."""
+        gamestate = load_fixture(
+            client, "add", "state-SMODS_BOOSTER_OPENED--pack.cards[0].key-c_heirophant"
+        )
+        before_count = gamestate["pack"]["count"]
+        before_limit = gamestate["pack"]["limit"]
+        before_id = gamestate["pack"]["cards"][0]["id"]
+
+        response = api(
+            client,
+            "add",
+            {"key": "c_immolate", "area": "pack", "replace": 0},
+        )
+        after = assert_gamestate_response(response)
+        assert after["pack"]["count"] == before_count
+        assert after["pack"]["limit"] == before_limit
+        assert after["pack"]["cards"][0]["id"] == before_id
+        assert after["pack"]["cards"][0]["key"] == "c_immolate"
+
     def test_add_voucher(self, client: httpx.Client) -> None:
         """Test adding a voucher with valid key in SHOP state."""
         gamestate = load_fixture(
@@ -98,6 +118,20 @@ class TestAddEndpoint:
         assert after["packs"]["count"] == initial_count + 1
         assert after["packs"]["cards"][initial_count]["key"] == "p_arcana_normal_1"
 
+    def test_replace_shop_booster(self, client: httpx.Client) -> None:
+        """Validation setup can force a booster without adding a shop slot."""
+        gamestate = load_fixture(client, "add", "state-SHOP--packs.count-2")
+        before_id = gamestate["packs"]["cards"][0]["id"]
+        response = api(
+            client,
+            "add",
+            {"key": "p_spectral_normal_1", "area": "packs", "replace": 0},
+        )
+        after = assert_gamestate_response(response)
+        assert after["packs"]["count"] == 2
+        assert after["packs"]["cards"][0]["id"] == before_id
+        assert after["packs"]["cards"][0]["key"] == "p_spectral_normal_1"
+
     def test_add_playing_card(self, client: httpx.Client) -> None:
         """Test adding a playing card with valid key."""
         gamestate = load_fixture(
@@ -111,6 +145,8 @@ class TestAddEndpoint:
         after = assert_gamestate_response(response)
         assert after["hand"]["count"] == 9
         assert after["hand"]["cards"][8]["key"] == "H_A"
+        assert after["hand"]["cards"][8]["set"] == "DEFAULT"
+        assert not after["hand"]["cards"][8]["modifier"]
 
     def test_add_no_key_provided(self, client: httpx.Client) -> None:
         """Test add endpoint with no key parameter."""
@@ -183,7 +219,7 @@ class TestAddEndpointStateRequirements:
         assert_error_response(
             api(client, "add", {"key": "j_joker"}),
             "INVALID_STATE",
-            "Method 'add' requires one of these states: SELECTING_HAND, SHOP, ROUND_EVAL",
+            "Method 'add' requires one of these states: SELECTING_HAND, SHOP, ROUND_EVAL, SMODS_BOOSTER_OPENED",
         )
 
     def test_add_playing_card_from_SHOP(self, client: httpx.Client) -> None:
@@ -279,6 +315,8 @@ class TestAddEndpointSeal:
         after = assert_gamestate_response(response)
         assert after["hand"]["count"] == 9
         assert after["hand"]["cards"][8]["key"] == "H_A"
+        assert after["hand"]["cards"][8]["set"] == "DEFAULT"
+        assert not after["hand"]["cards"][8]["modifier"].get("enhancement")
         assert after["hand"]["cards"][8]["modifier"]["seal"] == seal
 
     def test_add_playing_card_invalid_seal(self, client: httpx.Client) -> None:
@@ -353,6 +391,8 @@ class TestAddEndpointEdition:
         after = assert_gamestate_response(response)
         assert after["hand"]["count"] == 9
         assert after["hand"]["cards"][8]["key"] == "H_A"
+        assert after["hand"]["cards"][8]["set"] == "DEFAULT"
+        assert not after["hand"]["cards"][8]["modifier"].get("enhancement")
         assert after["hand"]["cards"][8]["modifier"]["edition"] == edition
 
     def test_add_consumable_with_negative_edition(self, client: httpx.Client) -> None:

@@ -32,7 +32,12 @@ return {
     },
   },
 
-  requires_state = { G.STATES.SELECTING_HAND, G.STATES.SHOP },
+  requires_state = {
+    G.STATES.BLIND_SELECT,
+    G.STATES.SELECTING_HAND,
+    G.STATES.SHOP,
+    G.STATES.SMODS_BOOSTER_OPENED,
+  },
 
   ---@param args Request.Endpoint.Sell.Params
   ---@param send_response fun(response: Response.Endpoint)
@@ -104,6 +109,16 @@ return {
 
     -- Log what we're selling
     local item_name = card.ability and card.ability.name or "Unknown"
+    local expects_invisible_replacement = (
+      item_name == "Invisible Joker"
+      and card.ability.invis_rounds >= card.ability.extra
+    )
+    local expects_boss_disable = (
+      item_name == "Luchador"
+      and G.GAME.blind
+      and not G.GAME.blind.disabled
+      and G.GAME.blind:get_type() == "Boss"
+    )
     sendDebugMessage(string.format("Selling %s '%s' for $%d", sell_type, item_name, card.sell_cost), "BB.ENDPOINTS")
 
     -- Create mock UI element for G.FUNCS.sell_card
@@ -125,8 +140,15 @@ return {
         local current_area = sell_type == "joker" and G.jokers or G.consumeables
         local current_array = current_area.cards
 
-        -- 1. Card count decreased by 1
-        local count_decreased = (current_area.config.card_count == initial_count - 1)
+        -- 1. The area did not grow. Mature Invisible Joker replaces itself
+        -- with a duplicate, so its successful sale keeps the count equal
+        -- instead of decreasing it by one.
+        local count_valid
+        if expects_invisible_replacement then
+          count_valid = current_area.config.card_count == initial_count
+        else
+          count_valid = current_area.config.card_count <= initial_count
+        end
 
         -- 2. Money increased by sell_cost
         local money_increased = (G.GAME.dollars == expected_money)
@@ -144,10 +166,41 @@ return {
         local state_stable = G.STATE_COMPLETE == true
 
         -- 5. Still in valid state
-        local valid_state = (G.STATE == G.STATES.SHOP or G.STATE == G.STATES.SELECTING_HAND)
+        local valid_state = (
+          G.STATE == G.STATES.BLIND_SELECT
+          or G.STATE == G.STATES.SHOP
+          or G.STATE == G.STATES.SELECTING_HAND
+          or G.STATE == G.STATES.SMODS_BOOSTER_OPENED
+        )
+
+        -- Card:can_use_consumeable rejects the next synchronous action while
+        -- a sale animation still owns the controller or STOP_USE window.
+        -- Removal and money settle earlier, so wait for those source gates as
+        -- well before acknowledging the sale.
+        local controller_ready = not G.CONTROLLER.locked
+          and not G.CONTROLLER.locks.use
+          and not (G.GAME.STOP_USE and G.GAME.STOP_USE > 0)
+
+        -- Selling these Jokers queues or performs gameplay effects in
+        -- addition to removing the card. Do not acknowledge the sale before
+        -- those effects are observable by the next synchronous request.
+        local effect_settled = true
+        if item_name == "Diet Cola" then
+          effect_settled = false
+          for _, tag in ipairs(G.GAME.tags or {}) do
+            if tag.key == "tag_double" then
+              effect_settled = true
+              break
+            end
+          end
+        elseif expects_boss_disable then
+          effect_settled = G.GAME.blind.disabled
+        end
 
         -- All conditions must be met
-        if count_decreased and money_increased and card_gone and state_stable and valid_state then
+        if count_valid and money_increased and card_gone and state_stable
+          and valid_state and controller_ready and effect_settled
+        then
           sendDebugMessage("Return sell()", "BB.ENDPOINTS")
           send_response(BB_GAMESTATE.get_gamestate())
           return true

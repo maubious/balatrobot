@@ -8,6 +8,7 @@
 ---@field hand integer[]? 0-based indices representing new order of cards in hand
 ---@field jokers integer[]? 0-based indices representing new order of jokers
 ---@field consumables integer[]? 0-based indices representing new order of consumables
+---@field sort string? Sort the hand using the source rank or suit button
 
 -- ==========================================================================
 -- Rearrange Endpoint
@@ -39,16 +40,29 @@ return {
       items = "integer",
       description = "0-based indices representing new order of consumables",
     },
+    sort = {
+      type = "string",
+      required = false,
+      description = "Sort hand by 'rank' or 'suit' using the source game callback",
+    },
   },
 
-  requires_state = { G.STATES.SELECTING_HAND, G.STATES.SHOP, G.STATES.SMODS_BOOSTER_OPENED },
+  requires_state = {
+    G.STATES.BLIND_SELECT,
+    G.STATES.SELECTING_HAND,
+    G.STATES.SHOP,
+    G.STATES.SMODS_BOOSTER_OPENED,
+  },
 
   ---@param args Request.Endpoint.Rearrange.Params
   ---@param send_response fun(response: Response.Endpoint)
   execute = function(args, send_response)
     sendDebugMessage("Init rearrange()", "BB.ENDPOINTS")
     -- Validate exactly one parameter is provided
-    local param_count = (args.hand and 1 or 0) + (args.jokers and 1 or 0) + (args.consumables and 1 or 0)
+    local param_count = (args.hand and 1 or 0)
+      + (args.jokers and 1 or 0)
+      + (args.consumables and 1 or 0)
+      + (args.sort and 1 or 0)
     if param_count == 0 then
       send_response({
         message = "Must provide exactly one of: hand, jokers, or consumables",
@@ -66,7 +80,32 @@ return {
     -- Determine which type to rearrange and validate state-specific requirements
     local rearrange_type, source_array, indices, type_name
 
-    if args.hand then
+    if args.sort then
+      if args.sort ~= "rank" and args.sort ~= "suit" then
+        send_response({
+          message = "Sort must be either 'rank' or 'suit'",
+          name = BB_ERROR_NAMES.BAD_REQUEST,
+        })
+        return
+      end
+      if G.STATE ~= G.STATES.SELECTING_HAND then
+        send_response({
+          message = "Can only sort hand during hand selection",
+          name = BB_ERROR_NAMES.INVALID_STATE,
+        })
+        return
+      end
+      if not G.hand or not G.hand.cards then
+        send_response({
+          message = "No hand available to sort",
+          name = BB_ERROR_NAMES.NOT_ALLOWED,
+        })
+        return
+      end
+      rearrange_type = "sort"
+      source_array = G.hand.cards
+      type_name = "hand"
+    elseif args.hand then
       -- Cards can only be rearranged during SELECTING_HAND
       if G.STATE ~= G.STATES.SELECTING_HAND and G.STATE ~= G.STATES.SMODS_BOOSTER_OPENED then
         send_response({
@@ -128,10 +167,12 @@ return {
       type_name = "consumables"
     end
 
-    assert(type(indices) == "table", "indices must be a table")
+    if not args.sort then
+      assert(type(indices) == "table", "indices must be a table")
+    end
 
     -- Log what we're rearranging
-    local order_str = "[" .. table.concat(indices, ",") .. "]"
+    local order_str = args.sort or ("[" .. table.concat(indices, ",") .. "]")
     sendDebugMessage(
       string.format("Rearranging %s (%d cards): %s", type_name, #source_array, order_str),
       "BB.ENDPOINTS"
@@ -139,7 +180,7 @@ return {
 
     -- Validate permutation: correct length, no duplicates, all indices present
     -- Check length matches
-    if #indices ~= #source_array then
+    if not args.sort and #indices ~= #source_array then
       send_response({
         message = "Must provide exactly " .. #source_array .. " indices for " .. type_name,
         name = BB_ERROR_NAMES.BAD_REQUEST,
@@ -149,7 +190,7 @@ return {
 
     -- Check for duplicates and range
     local seen = {}
-    for _, idx in ipairs(indices) do
+    for _, idx in ipairs(indices or {}) do
       -- Check range [0, N-1]
       if idx < 0 or idx >= #source_array then
         send_response({
@@ -172,12 +213,18 @@ return {
 
     -- Create new array from indices (convert 0-based to 1-based)
     local new_array = {}
-    for _, old_index in ipairs(indices) do
+    for _, old_index in ipairs(indices or {}) do
       table.insert(new_array, source_array[old_index + 1])
     end
 
     -- Replace the array in game state
-    if rearrange_type == "hand" then
+    if rearrange_type == "sort" then
+      if args.sort == "rank" then
+        G.FUNCS.sort_hand_value({})
+      else
+        G.FUNCS.sort_hand_suit({})
+      end
+    elseif rearrange_type == "hand" then
       G.hand.cards = new_array
     elseif rearrange_type == "jokers" then
       G.jokers.cards = new_array
@@ -209,17 +256,21 @@ return {
       func = function()
         -- Check that we're still in a valid state and arrays exist
         local done = false
-        if args.hand then
+        if args.sort then
+          done = G.STATE == G.STATES.SELECTING_HAND and G.hand ~= nil
+        elseif args.hand then
           done = (G.STATE == G.STATES.SELECTING_HAND or G.STATE == G.STATES.SMODS_BOOSTER_OPENED) and G.hand ~= nil
         elseif args.jokers then
           done = (
-            G.STATE == G.STATES.SHOP
+            G.STATE == G.STATES.BLIND_SELECT
+            or G.STATE == G.STATES.SHOP
             or G.STATE == G.STATES.SELECTING_HAND
             or G.STATE == G.STATES.SMODS_BOOSTER_OPENED
           ) and G.jokers ~= nil
         else -- consumables
           done = (
-            G.STATE == G.STATES.SHOP
+            G.STATE == G.STATES.BLIND_SELECT
+            or G.STATE == G.STATES.SHOP
             or G.STATE == G.STATES.SELECTING_HAND
             or G.STATE == G.STATES.SMODS_BOOSTER_OPENED
           ) and G.consumeables ~= nil

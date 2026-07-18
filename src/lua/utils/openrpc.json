@@ -485,6 +485,72 @@
       ]
     },
     {
+      "name": "record",
+      "summary": "Control manual action recording",
+      "description": "Start, stop, or inspect manual UI action recording.",
+      "tags": [
+        {
+          "$ref": "#/components/tags/game-control"
+        }
+      ],
+      "params": [
+        {
+          "name": "enabled",
+          "description": "Start recording when true or stop when false; omit to inspect status.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "path",
+          "description": "Optional output path used when starting a recording.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "recording",
+        "description": "Current recording status and output metadata.",
+        "schema": {
+          "type": "object"
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/InternalError"
+        }
+      ]
+    },
+    {
+      "name": "reroll_boss",
+      "summary": "Reroll the upcoming Boss Blind",
+      "description": "Use Director's Cut or Retcon to reroll the upcoming Boss Blind for $10.",
+      "tags": [
+        {
+          "$ref": "#/components/tags/game-control"
+        }
+      ],
+      "params": [],
+      "result": {
+        "name": "gamestate",
+        "description": "Complete game state after the Boss reroll",
+        "schema": {
+          "$ref": "#/components/schemas/GameState"
+        }
+      },
+      "errors": [
+        {
+          "$ref": "#/components/errors/InvalidState"
+        },
+        {
+          "$ref": "#/components/errors/NotAllowed"
+        }
+      ]
+    },
+    {
       "name": "save",
       "summary": "Save the current run state to a file",
       "description": "Save the current run state to a file. Only works during an active run.",
@@ -1027,6 +1093,10 @@
         "type": "object",
         "description": "Current round state",
         "properties": {
+          "run_hands_played": {
+            "type": "integer",
+            "description": "Number of hands played in the run"
+          },
           "hands_left": {
             "type": "integer",
             "description": "Number of hands remaining in this round"

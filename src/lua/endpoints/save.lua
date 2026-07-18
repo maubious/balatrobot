@@ -13,6 +13,50 @@
 
 local nativefs = require("nativefs")
 
+-- STR_PACK relies on Lua's implicit number-to-string conversion, which keeps
+-- too few digits to round-trip every binary64 value. That is appropriate for
+-- ordinary game saves, but a differential checkpoint must be a byte-exact
+-- snapshot of numeric simulator state: otherwise loading the live checkpoint
+-- can move a value by one ULP while the cloned native state is unchanged.
+-- Keep the existing table format and only make number formatting lossless.
+local function exact_number(value)
+  if value ~= value then return "(0/0)" end
+  if value == math.huge then return "(1/0)" end
+  if value == -math.huge then return "(-1/0)" end
+  return string.format("%.17g", value)
+end
+
+local function exact_pack(data, recursive)
+  local result = (recursive and "" or "return ") .. "{"
+  for key, value in pairs(data) do
+    local key_type, value_type = type(key), type(value)
+    assert(key_type ~= "table", "Data table cannot have a table as a key reference")
+    if key_type == "string" then
+      key = "[" .. string.format("%q", key) .. "]"
+    elseif key_type == "number" then
+      key = "[" .. exact_number(key) .. "]"
+    else
+      key = "[" .. tostring(key) .. "]"
+    end
+
+    if value_type == "table" then
+      if value.is and value:is(Object) then
+        value = [["MANUAL_REPLACE"]]
+      else
+        value = exact_pack(value, true)
+      end
+    elseif value_type == "number" then
+      value = exact_number(value)
+    elseif value_type == "string" then
+      value = string.format("%q", value)
+    elseif value_type == "boolean" then
+      value = value and "true" or "false"
+    end
+    result = result .. key .. "=" .. value .. ","
+  end
+  return result .. "}"
+end
+
 -- ==========================================================================
 -- Save Endpoint
 -- ==========================================================================
@@ -68,14 +112,8 @@ return {
     -- Call save_run() and use compress_and_save
     save_run() ---@diagnostic disable-line: undefined-global
 
-    local temp_filename = "balatrobot_temp_save_" .. BB_SETTINGS.port .. ".jkr"
-    compress_and_save(temp_filename, G.ARGS.save_run) ---@diagnostic disable-line: undefined-global
-
-    -- Read from temp and write to target path using nativefs
-    local save_dir = love.filesystem.getSaveDirectory()
-    local temp_path = save_dir .. "/" .. temp_filename
-    local compressed_data = nativefs.read(temp_path)
-    ---@cast compressed_data string
+    local save_string = exact_pack(G.ARGS.save_run)
+    local compressed_data = love.data.compress("string", "deflate", save_string, 1)
 
     if not compressed_data then
       send_response({
@@ -93,9 +131,6 @@ return {
       })
       return
     end
-
-    -- Clean up
-    love.filesystem.remove(temp_filename)
 
     sendDebugMessage("Return save() - saved to " .. path, "BB.ENDPOINTS")
     send_response({
