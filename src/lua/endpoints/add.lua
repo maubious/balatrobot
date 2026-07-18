@@ -6,8 +6,8 @@
 
 ---@class Request.Endpoint.Add.Params
 ---@field key Card.Key The card key to add (j_* for jokers, c_* for consumables, v_* for vouchers, SUIT_RANK for playing cards)
----@field area string? Validation injection destination ("packs" for a shop booster, "pack" for an open-pack card)
----@field replace integer? 0-based slot to replace when area is "pack"
+---@field area string? Validation injection destination ("shop", "packs", or "pack")
+---@field replace integer? 0-based slot to replace when area is set
 ---@field seal Card.Modifier.Seal? The card seal to apply (only for playing cards)
 ---@field edition Card.Modifier.Edition? The card edition to apply (jokers, playing cards and NEGATIVE consumables)
 ---@field enhancement Card.Modifier.Enhancement? The card enhancement to apply (playing cards)
@@ -158,12 +158,12 @@ return {
     area = {
       type = "string",
       required = false,
-      description = "Validation injection destination: 'packs' replaces a shop booster; 'pack' replaces an open-pack card",
+      description = "Validation injection destination: 'shop' replaces a shop card; 'packs' replaces a shop booster; 'pack' replaces an open-pack card",
     },
     replace = {
       type = "integer",
       required = false,
-      description = "0-based pack slot to replace (required when area is 'pack')",
+      description = "0-based slot to replace when area is set",
     },
     seal = {
       type = "string",
@@ -224,6 +224,77 @@ return {
     -- stable identity, visual position, pack size, and remaining choice count.
     -- It also avoids consuming gameplay RNG merely to arrange a test fixture.
     if args.area ~= nil then
+      if args.area == "shop" then
+        if G.STATE ~= G.STATES.SHOP then
+          send_response({
+            message = "Shop cards can only be replaced in the shop",
+            name = BB_ERROR_NAMES.INVALID_STATE,
+          })
+          return
+        end
+        if card_type ~= "joker" or not G.P_CENTERS[args.key] then
+          send_response({
+            message = "Joker key not found: " .. args.key,
+            name = BB_ERROR_NAMES.BAD_REQUEST,
+          })
+          return
+        end
+        if type(args.replace) ~= "number"
+          or args.replace ~= math.floor(args.replace)
+          or args.replace < 0
+        then
+          send_response({
+            message = "Shop replacement requires a non-negative integer 'replace' index",
+            name = BB_ERROR_NAMES.BAD_REQUEST,
+          })
+          return
+        end
+        local card = G.shop_jokers
+          and G.shop_jokers.cards
+          and G.shop_jokers.cards[args.replace + 1]
+        if not card then
+          local count = G.shop_jokers and G.shop_jokers.cards and #G.shop_jokers.cards or 0
+          send_response({
+            message = string.format(
+              "Shop card index out of range. Index: %d, Available cards: %d",
+              args.replace,
+              count
+            ),
+            name = BB_ERROR_NAMES.BAD_REQUEST,
+          })
+          return
+        end
+        local edition = args.edition and EDITION_MAP[args.edition]
+        if args.edition and not edition then
+          send_response({
+            message = "Invalid edition value. Expected: HOLO, FOIL, POLYCHROME, or NEGATIVE",
+            name = BB_ERROR_NAMES.BAD_REQUEST,
+          })
+          return
+        end
+        replace_card_center(card, args.key)
+        if edition then card:set_edition({[string.lower(args.edition)] = true}, true) end
+        card:set_cost()
+        create_shop_card_ui(card, "Joker", G.shop_jokers)
+        G.shop_jokers:align_cards()
+        G.E_MANAGER:add_event(Event({
+          trigger = "condition",
+          blocking = false,
+          func = function()
+            local ready = card.children
+              and card.children.buy_button
+              and G.STATE == G.STATES.SHOP
+              and G.STATE_COMPLETE
+              and not G.CONTROLLER.locked
+            if ready then
+              send_response(BB_GAMESTATE.get_gamestate())
+              return true
+            end
+            return false
+          end,
+        }))
+        return
+      end
       if args.area == "packs" then
         if G.STATE ~= G.STATES.SHOP then
           send_response({
@@ -291,7 +362,7 @@ return {
       end
       if args.area ~= "pack" then
         send_response({
-          message = "Invalid add area. Expected: packs or pack",
+        message = "Invalid add area. Expected: shop, packs, or pack",
           name = BB_ERROR_NAMES.BAD_REQUEST,
         })
         return
@@ -303,9 +374,9 @@ return {
         })
         return
       end
-      if card_type ~= "consumable" then
+      if card_type ~= "consumable" and card_type ~= "joker" then
         send_response({
-          message = "Only consumables can be injected into an open pack",
+          message = "Only consumables and Jokers can be injected into an open pack",
           name = BB_ERROR_NAMES.BAD_REQUEST,
         })
         return
@@ -340,22 +411,36 @@ return {
         return
       end
       local center = G.P_CENTERS[args.key]
-      if not center or not center.consumeable then
+      if not center or (not center.consumeable and center.set ~= "Joker") then
         send_response({
-          message = "Consumable key not found: " .. args.key,
+          message = "Consumable or Joker key not found: " .. args.key,
           name = BB_ERROR_NAMES.BAD_REQUEST,
         })
         return
       end
-      if args.seal or args.edition or args.enhancement or args.eternal or args.perishable or args.rental then
+      if args.seal or args.enhancement or args.eternal or args.perishable or args.rental
+        or (args.edition and card_type ~= "joker")
+      then
         send_response({
-          message = "Pack replacement does not accept card modifiers",
+          message = "Pack replacement only accepts an edition on a Joker",
           name = BB_ERROR_NAMES.BAD_REQUEST,
         })
         return
       end
 
+      if args.edition then
+        if not EDITION_MAP[args.edition] then
+          send_response({
+            message = "Invalid edition value. Expected: HOLO, FOIL, POLYCHROME, or NEGATIVE",
+            name = BB_ERROR_NAMES.BAD_REQUEST,
+          })
+          return
+        end
+      end
       replace_card_center(card, args.key)
+      if args.edition then
+        card:set_edition({[string.lower(args.edition)] = true}, true)
+      end
       card:set_cost()
       G.pack_cards:align_cards()
       send_response(BB_GAMESTATE.get_gamestate())

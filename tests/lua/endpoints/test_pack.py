@@ -158,6 +158,28 @@ class TestPackEndpointJokerSlots:
             "Cannot select joker, joker slots are full. Current: 5, Limit: 5",
         )
 
+    def test_pack_negative_joker_when_slots_full(self, client: httpx.Client) -> None:
+        """A Negative Joker supplies the slot it needs when selected."""
+        gamestate = load_fixture(
+            client,
+            "pack",
+            "state-SMODS_BOOSTER_OPENED--pack.type-buffoon--jokers.count-5",
+        )
+        assert gamestate["jokers"]["count"] == gamestate["jokers"]["limit"] == 5
+
+        response = api(
+            client,
+            "add",
+            {"key": "j_joker", "area": "pack", "replace": 0, "edition": "NEGATIVE"},
+        )
+        gamestate = assert_gamestate_response(response)
+        assert gamestate["pack"]["cards"][0]["modifier"]["edition"] == "NEGATIVE"
+
+        response = api(client, "pack", {"card": 0})
+        gamestate = assert_gamestate_response(response, state="SHOP")
+        assert gamestate["jokers"]["count"] == gamestate["jokers"]["limit"] == 6
+        assert gamestate["jokers"]["cards"][-1]["modifier"]["edition"] == "NEGATIVE"
+
     def test_pack_joker_slots_available(self, client: httpx.Client) -> None:
         """Test selecting joker when slots available succeeds."""
         load_fixture(

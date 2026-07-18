@@ -100,7 +100,7 @@ class TestBuyEndpoint:
         )
 
     def test_buy_joker_slots_full(self, client: httpx.Client) -> None:
-        """Test buy endpoint when player has the maximum number of consumables."""
+        """Test buying a normal Joker when all Joker slots are full."""
         gamestate = load_fixture(
             client, "buy", "state-SHOP--jokers.count-5--shop.cards[0].set-JOKER"
         )
@@ -112,6 +112,26 @@ class TestBuyEndpoint:
             "BAD_REQUEST",
             "Cannot purchase joker card, joker slots are full. Current: 5, Limit: 5",
         )
+
+    def test_buy_negative_joker_when_slots_full(self, client: httpx.Client) -> None:
+        """A Negative Joker supplies the slot it needs and remains purchasable."""
+        gamestate = load_fixture(
+            client, "buy", "state-SHOP--jokers.count-5--shop.cards[0].set-JOKER"
+        )
+        assert gamestate["jokers"]["count"] == gamestate["jokers"]["limit"] == 5
+
+        response = api(
+            client,
+            "add",
+            {"key": "j_joker", "area": "shop", "replace": 0, "edition": "NEGATIVE"},
+        )
+        gamestate = assert_gamestate_response(response)
+        assert gamestate["shop"]["cards"][0]["modifier"]["edition"] == "NEGATIVE"
+
+        response = api(client, "buy", {"card": 0})
+        gamestate = assert_gamestate_response(response)
+        assert gamestate["jokers"]["count"] == gamestate["jokers"]["limit"] == 6
+        assert gamestate["jokers"]["cards"][-1]["modifier"]["edition"] == "NEGATIVE"
 
     def test_buy_consumable_slots_full(self, client: httpx.Client) -> None:
         """Test buy endpoint when player has the maximum number of consumables."""

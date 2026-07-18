@@ -131,7 +131,8 @@ return {
 
     -- Ensure there is space in joker area
     if card.set == "JOKER" then
-      if gamestate.jokers.count >= gamestate.jokers.limit then
+      local negative = card.modifier and card.modifier.edition == "NEGATIVE"
+      if gamestate.jokers.count >= gamestate.jokers.limit and not negative then
         send_response({
           message = "Cannot purchase joker card, joker slots are full. Current: "
             .. gamestate.jokers.count
@@ -145,7 +146,8 @@ return {
 
     -- Ensure there is space in consumable area
     if card.set == "PLANET" or card.set == "SPECTRAL" or card.set == "TAROT" then
-      if gamestate.consumables.count >= gamestate.consumables.limit then
+      local negative = card.modifier and card.modifier.edition == "NEGATIVE"
+      if gamestate.consumables.count >= gamestate.consumables.limit and not negative then
         send_response({
           message = "Cannot purchase consumable card, consumable slots are full. Current: "
             .. gamestate.consumables.count

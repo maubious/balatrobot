@@ -139,7 +139,8 @@ return {
       if card.ability and card.ability.set == "Joker" then
         local joker_count = G.jokers and G.jokers.config and G.jokers.config.card_count or 0
         local joker_limit = G.jokers and G.jokers.config and G.jokers.config.card_limit or 0
-        if joker_count >= joker_limit then
+        local negative = card.edition and card.edition.negative
+        if joker_count >= joker_limit and not negative then
           send_response({
             message = "Cannot select joker, joker slots are full. Current: "
               .. joker_count
